@@ -59,6 +59,12 @@ static bool     clPaused = false;      // true when ST_CL_EMPTY was entered from
 static bool     clRefilled = false;    // refill confirmed, CL_REFILLED delay running
 static uint32_t clRefilledAt = 0;
 static uint32_t clFeedElapsed = 0;     // feed time used before the pause (feed timeout does not run while paused)
+// Acid container empty DURING ACID_FILL: the cycle pauses (R1 off) and resumes after the refill,
+// using the same accepted pH reading (no new pH check).
+static bool     acidPaused = false;    // true when ST_ACID_EMPTY was entered from ST_ACID_FILL
+static bool     acidRefilled = false;  // refill confirmed, ACID_REFILLED_MS delay running
+static uint32_t acidRefilledAt = 0;
+static uint32_t acidFillElapsed = 0;   // fill time used before the pause (fill timeout does not run while paused)
 
 static uint32_t elapsed() { return millis() - stateStart; }
 
@@ -105,6 +111,7 @@ static void startAcid() {
   if (Sensors::acidEmpty()) {
     Serial.println(F("Acid container EMPTY - acid dosing blocked"));
     Actuators::allOff();
+    acidPaused = false;                      // found before the cycle started: nothing to resume
     enter(ST_ACID_EMPTY);
     return;
   }
@@ -115,6 +122,13 @@ static void startAcid() {
 
 static void startChlorine() {
   Serial.println(F("pH low -> chlorine"));
+#if CL_SKIP_FEED
+  Serial.println(F("TEST: feed/drop skipped, going straight to mixing"));
+  if (!relay(R4_WATER_B, true)) return;
+  if (!relay(R5_MIXER, true)) return;
+  r4Done = r5Done = false;
+  enter(ST_CL_MIX);
+#else
   Actuators::servo2Close();
   if (!Sensors::tare()) { fault("HX711 NO RESP"); return; }
   lastWeight = 0;
@@ -122,6 +136,7 @@ static void startChlorine() {
   servo1Spinning = true;
   stepStart = millis();
   enter(ST_CL_FEED);
+#endif
 }
 
 // ---------------- display ----------------
@@ -166,37 +181,42 @@ static void updateDisplay() {
       }
       break;
     case ST_ACID_FILL:
-      snprintf(l1, sizeof(l1), "DOSING: M. ACID");
+      snprintf(l1, sizeof(l1), "DOSE: M. ACID");
       snprintf(l2, sizeof(l2), "FILL ACID");
       break;
     case ST_ACID_WATER:
-      snprintf(l1, sizeof(l1), "DOSING: M. ACID");
+      snprintf(l1, sizeof(l1), "DOSE: M. ACID");
       snprintf(l2, sizeof(l2), "ADD WATER");
       break;
     case ST_ACID_DISPENSE:
-      snprintf(l1, sizeof(l1), "DOSING: M. ACID");
+      snprintf(l1, sizeof(l1), "DOSE: M. ACID");
       snprintf(l2, sizeof(l2), "DISPENSING");
       break;
     case ST_CL_FEED:
-      snprintf(l1, sizeof(l1), "DOSING: CHLORINE");
+      snprintf(l1, sizeof(l1), "DOSE: CHLORINE");
       snprintf(l2, sizeof(l2), "W: %d/%dg", (int)lastWeight, (int)TARGET_WEIGHT_G);
       break;
     case ST_CL_DROP:
     case ST_CL_SETTLE:                       // settle shows DROPPING too (by design)
-      snprintf(l1, sizeof(l1), "DOSING: CHLORINE");
+      snprintf(l1, sizeof(l1), "DOSE: CHLORINE");
       snprintf(l2, sizeof(l2), "DROPPING");
       break;
     case ST_CL_MIX:
-      snprintf(l1, sizeof(l1), "DOSING: CHLORINE");
+      snprintf(l1, sizeof(l1), "DOSE: CHLORINE");
       snprintf(l2, sizeof(l2), "MIXING");
       break;
     case ST_CL_DISPENSE:
-      snprintf(l1, sizeof(l1), "DOSING: CHLORINE");
+      snprintf(l1, sizeof(l1), "DOSE: CHLORINE");
       snprintf(l2, sizeof(l2), "DISPENSING");
       break;
     case ST_ACID_EMPTY:
-      snprintf(l1, sizeof(l1), "EMPTY: ACID");
-      snprintf(l2, sizeof(l2), "REFILL");
+      if (acidPaused && acidRefilled) {
+        snprintf(l1, sizeof(l1), "REFILLED");
+        snprintf(l2, sizeof(l2), "RESUMING...");
+      } else {
+        snprintf(l1, sizeof(l1), "EMPTY: ACID");
+        snprintf(l2, sizeof(l2), "REFILL");
+      }
       break;
     case ST_CL_EMPTY:
       if (clPaused && clRefilled) {
@@ -258,6 +278,7 @@ void loop() {
       if (Sensors::acidEmpty()) {
         Actuators::allOff();
         Serial.println(F("Acid container EMPTY - all dosing blocked"));
+        acidPaused = false;                  // found at IDLE: no cycle to resume
         enter(ST_ACID_EMPTY);
         break;
       }
@@ -292,7 +313,10 @@ void loop() {
     case ST_ACID_FILL:
       if (Sensors::acidEmpty()) {           // container ran dry while pumping
         if (!relay(R1_ACID_PUMP, false)) break;
-        Serial.println(F("Acid container EMPTY - stopped"));
+        acidFillElapsed = elapsed();         // fill time used so far; the timeout does not run while paused
+        acidPaused = true;
+        acidRefilled = false;
+        Serial.println(F("Acid container EMPTY while filling - paused"));
         enter(ST_ACID_EMPTY);
       } else if (Sensors::float1Reached()) {
         if (!relay(R1_ACID_PUMP, false)) break;
@@ -303,12 +327,32 @@ void loop() {
       }
       break;
 
+    // Acid empty. Two cases:
+    //  - found at IDLE / before the cycle started (acidPaused false): everything blocked until
+    //    refilled, then back to IDLE (a fresh pH check follows);
+    //  - found while filling (acidPaused true): R1 stopped. After the refill is confirmed and
+    //    ACID_REFILLED_MS has passed, ACID_FILL resumes with the SAME accepted pH (no new reading),
+    //    and the fill timeout continues from the time already used.
+    // No cooldown is started here: it only starts when a whole dosing process ends.
     case ST_ACID_EMPTY:
-      // Everything stays off until refilled. No new cooldown is started here:
-      // the cooldown only starts when a whole dosing process ends.
-      if (!Sensors::acidEmpty()) {
-        Serial.println(F("Acid container refilled"));
-        enter(ST_IDLE);
+      if (!acidPaused) {
+        if (!Sensors::acidEmpty()) {
+          Serial.println(F("Acid container refilled"));
+          enter(ST_IDLE);
+        }
+      } else if (Sensors::acidEmpty()) {
+        acidRefilled = false;                // empty (again): cancel any resume delay
+      } else if (!acidRefilled) {
+        acidRefilled = true;                 // refill confirmed: start the resume delay
+        acidRefilledAt = millis();
+        Serial.println(F("Acid container refilled - resuming shortly"));
+      } else if ((millis() - acidRefilledAt) >= ACID_REFILLED_MS) {
+        acidPaused = false;
+        acidRefilled = false;
+        if (!relay(R1_ACID_PUMP, true)) break;
+        enter(ST_ACID_FILL);
+        stateStart = millis() - acidFillElapsed;   // fill timeout continues where it stopped
+        Serial.println(F("Resuming acid fill"));
       }
       break;
 
@@ -451,8 +495,13 @@ void loop() {
         r5Done = true;
       }
       if (r4Done && r5Done) {            // R6 waits for BOTH
+#if CL_DISPENSE_ENABLED
         if (!relay(R6_DISP_B, true)) break;
         enter(ST_CL_DISPENSE);
+#else
+        Serial.println(F("TEST: dispense pump disabled, ending cycle"));
+        finishCycle();
+#endif
       }
       break;
 

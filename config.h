@@ -17,11 +17,11 @@
 #define BOOT_TITLE_MS      5000UL   // how long the boot title stays on the LCD
 
 // ---------------- pH ----------------
-#define PH_THRESHOLD          7.2f
+#define PH_THRESHOLD          8.2f
 // pH = PH_SLOPE * voltfage + PH_OFFSET   (placeholder values, calibrate with pH 4/7/10 buffers)
 // Three-point calibration (4.01, 6.86, 9.18)
-#define PH_SLOPE  -7.46641f
-#define PH_OFFSET 31.67465f
+#define PH_SLOPE   -7.64680f
+#define PH_OFFSET  30.93342f
 #define PH_SAMPLES            15          // ADC reads per pH sample (median of N, about 150 ms)
 #define PH_SAMPLE_DELAY_MS    10
 #define PH_CHECK_INTERVAL_MS  5000UL      // pause before the next pH check when the last one did not start a dose
@@ -42,21 +42,21 @@
 #define COOLDOWN_MS           600000UL   // wait after each dose (60 minutes)
 
 // ---------------- Acid mechanism ----------------
-#define ACID_FILL_TIMEOUT_MS   60000UL    // R1 max run waiting for float 1
-#define ACID_WATER_TIMEOUT_MS  60000UL    // R2 max run waiting for float 2
-#define ACID_DISPENSE_MS       20000UL    // R3 run time
+#define ACID_FILL_TIMEOUT_MS   360000UL    // R1 max run waiting for float 1
+#define ACID_WATER_TIMEOUT_MS  360000UL    // R2 max run waiting for float 2
+#define ACID_DISPENSE_MS       200000UL    // R3 run time
+#define ACID_REFILLED_MS       3000UL      // after a refill during ACID_FILL is confirmed, wait this long before R1 restarts (0 = resume at once)
 
 #define FLOAT_DEBOUNCE_MS      300UL
 
 // ---------------- Chlorine mechanism ----------------
-#define TARGET_WEIGHT_G        255.0f
+#define TARGET_WEIGHT_G        255.0f       //temporary value, default 255
 #define SLOW_BAND_G            20.0f      // within this of target, Servo 1 switches to pulse feeding
 #define PULSE_OPEN_MS          150UL
 #define PULSE_SETTLE_MS        500UL
-#define CL_FEED_TIMEOUT_MS     90000UL    // max time to reach target weight (does not run while CL_EMPTY pauses the feed)
+#define CL_FEED_TIMEOUT_MS     90000UL    // max time to reach target weight (does    not run while CL_EMPTY pauses the feed)
 #define CL_REFILLED_MS         3000UL     // CL_REFILLED message time after a refill is confirmed, before feeding resumes
-#define LOADCELL_SCALE         420.0f     // placeholder, calibrate with a known weight
-
+#define LOADCELL_SCALE  1174.62f
 #define SERVO_CLOSED_DEG       0
 #define SERVO_OPEN_DEG         90
 
@@ -65,6 +65,12 @@
 #define CHECK_PLATFORM_EMPTY   1          // fault if platform not empty after drop
 #define PLATFORM_EMPTY_TOL_G   100.0f
 
-#define CL_R4_MS               15000UL     // Relay 4 water pump B duration (timer only, no float)
-#define CL_R5_MS               20000UL    // Relay 5 mixer motor duration
-#define CL_R6_MS               20000UL    // Relay 6 dispensing pump B (starts after BOTH R4 and R5 finish)
+#define CL_R4_MS      70000UL     // water pump B: 70 s
+#define CL_R5_MS      900000UL    // mixer: 15 min
+
+//for testing dissolving of chlorine with mixer
+#define CL_SKIP_FEED  0   // 1 = TEST: skip Servo 1 feeding, Servo 2 drop and platform check; go straight to mixing
+#define CL_DISPENSE_ENABLED     1   // 0 = skip Relay 6 (dispensing pump B never turns on)
+
+
+#define CL_R6_MS      90000UL     // dispensing pump B: 1 min 30 s
