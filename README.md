@@ -10,10 +10,10 @@ An Arduino Mega 2560 automatic pool chemical dosing system. It reads pool pH and
 
 | Accepted pH | Action |
 |---|---|
-| Above 7.2 | Muriatic acid mechanism |
-| Below 7.2 | Chlorine mechanism |
+| Above 8.2 | Muriatic acid mechanism |
+| Below 8.2 | Chlorine mechanism |
 
-- Single 7.2 threshold, no hysteresis.
+- Single 8.2 threshold, no hysteresis.
 - Only a *settled and confirmed* pH reading (median of the last 10 samples, taken about once per second, within a stability band) can trigger dosing.
 - After a completed dosing cycle, a **cooldown** starts (`COOLDOWN_MS`, intended 60 minutes). The LCD shows the countdown. Cooldown does not persist across power cycles, so the first pH check after power-up runs immediately.
 - No cooldown starts after refilling an empty container.
@@ -181,7 +181,7 @@ Formula: minutes x 60 x 1000.
 
 | Setting | Current | What it does |
 |---|---|---|
-| `PH_THRESHOLD` | 7.2f | Above = acid, below = chlorine. |
+| `PH_THRESHOLD` | 8.2f | Above = acid, below = chlorine. |
 | `PH_SLOPE`, `PH_OFFSET` | see [pH calibration](#ph-new-electrode-nov-22-2026) | `pH = PH_SLOPE x volts + PH_OFFSET`. Recalibrate whenever the electrode changes. |
 | `PH_SAMPLES` | 15 | ADC reads per pH sample (median of N, about 150 ms). |
 | `PH_SAMPLE_DELAY_MS` | 10 | Delay between those ADC reads. |
@@ -306,7 +306,7 @@ Recent changes (Nov 22, 2026):
 - Servo 1 type confirmation and ultrasonic empty-distance calibration (`CL_EMPTY_DISTANCE_CM`).
 - Full hardware validation with real pool-water pH checks.
 
-**Ideas under consideration (not approved):** pH hysteresis around 7.2, longer cooldown, max doses per day, circulation-pump interlock, pool-volume-based dosing, no-progress detection during `CL_FEED`.
+**Ideas under consideration (not approved):** pH hysteresis around 8.2, longer cooldown, max doses per day, circulation-pump interlock, pool-volume-based dosing, no-progress detection during `CL_FEED`.
 
 ## Safety checklist
 
